@@ -53,6 +53,17 @@ function assertValid(line: string): number {
   if (/[\u0000-\u001f\u007f]/.test(line)) {
     throw new Error("letter must not contain control characters");
   }
+  // No invisible non-ASCII characters: zero-width joiners/spaces, bidi
+  // controls and non-breaking spaces render as nothing (or as a space)
+  // yet count toward the gate, so a letter that looks 102 characters
+  // long could silently be judged longer — or contain hidden bytes the
+  // reader never sees. The em dash in the letter is a visible glyph and
+  // is intentionally kept.
+  if (/[\u00a0\u200b-\u200f\u2028-\u202e\u2060\ufeff]/.test(line)) {
+    throw new Error(
+      "letter must not contain invisible characters (zero-width, bidi controls, non-breaking space)",
+    );
+  }
   return count;
 }
 
@@ -73,6 +84,18 @@ function assertDeterministic(line: string): void {
     const bytesB = readFileSync(b);
     if (!bytesA.equals(bytesB)) {
       throw new Error("determinism check failed: two writes differ");
+    }
+    // Byte-length check: the letter contains a multi-byte em dash, so
+    // its UTF-8 byte length (104) must exceed its code-point count
+    // (102) by exactly the extra bytes of that one character. A
+    // mismatch here means the encoding changed under us — e.g. a
+    // normalizer silently rewrote the dash — even though the visible
+    // text still looks the same.
+    const expectedBytes = Buffer.byteLength(line, "utf8");
+    if (bytesA.length !== expectedBytes) {
+      throw new Error(
+        `determinism check failed: expected ${expectedBytes} bytes, got ${bytesA.length}`,
+      );
     }
     if (bytesA.toString("utf8") !== line) {
       throw new Error("determinism check failed: bytes do not match the letter");
